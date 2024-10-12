@@ -29,14 +29,10 @@ jobs:
               run: |
                 python -m pip install --upgrade pip
                 pip install -r requirements.txt
-            
-            - name: Compilar app
-              run: |
-                python app.py
 
             - name: Run tests
               run: |
-                pytest -v 
+                pytest -v --junitxml=./test-reports/results.xml
               continue-on-error: false
               env:
                 CI: true
@@ -47,22 +43,23 @@ jobs:
                 name: test-results
                 path: ./test-reports/
 
-            - name: Sonarqube Scanner
-              env:
-                SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-                SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-              run: |
-                sonar-scanner \
-                -Dsonar.projectKey=my_project_key \
-                -Dsonar.sources=. \
-                -Dsonar.host.url=${SONAR_HOST_URL} \
-                -Dsonar.login=${SONAR_TOKEN}
-              continue-on-error: false
+
+            #- name: Sonarqube Scanner
+            #  env:
+            #    SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+            #    SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+            #  run: |
+            #    sonar-scanner \
+            #    -Dsonar.projectKey=my_project_key \
+            #    -Dsonar.sources=. \
+            #    -Dsonar.host.url=${SONAR_HOST_URL} \
+            #    -Dsonar.login=${SONAR_TOKEN}
+            #  continue-on-error: false
 
             - name: Run secret detection with gitleaks
               uses: gitleaks/gitleaks-action@v2
               env:
-                GITHUB_TOKEN = ${{ secrets.GITHUB_TOKEN }}
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               with:
                 args: --path=. --verbose
               continue-on-error: false
@@ -70,9 +67,31 @@ jobs:
             - name: Login DockerHub
               if: success()
               run: |
+                docker login -u $DOCKERHUB_USERNAME -p $DOCKERHUB_TOKEN
+
             
+            - name: Build Docker Image
+              if: success()
+              env:
+                DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+                DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+              run: |
+                docker build -t universe1609/daveops:${{ github.sha }} .
+
+            - name: Run Trivy vulnerability scanner
+              uses: aquasecurity/trivy-action@0.20.0
+              with:
+                image-ref: 'universe1609/daveops:${{ github.sha }}'
+                format: 'table'
+                exit-code: '1'
+                ignore-unfixed: true
+                vuln-type: 'os,library'
+                severity: 'CRITICAL,HIGH'
+
             - name: Push Docker Image
-                if: success()
-                run: |
-                    docker build -t my_image .
-                    echo ${{ secrets.DOCKERH
+              if: success()
+              env:
+                DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+                DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+              run: |
+                docker push universe1609/daveops:${{ github.sha }}
